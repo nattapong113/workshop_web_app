@@ -1,3 +1,5 @@
+using TodoApi.Dtos;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -14,8 +16,14 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapGet("/", () => "Hello Todo API");
+var todos = new List<TodoGetDto>
+{
+    new(1, "Learn C#", true),
+    new(2,"Learn ASP.NET Core", false),
+    new(3,"Build a web API", false)
+};
 
+app.MapGet("/api/todos",() => Results.Ok(todos));
 app.Run();
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
