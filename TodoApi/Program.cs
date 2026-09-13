@@ -1,8 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 using TodoApi.Dtos;
 using TodoApi.Models;
 using TodoApi.Data;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +21,29 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         builder.Configuration.GetConnectionString("DefaultConnection")
     ));
 
+var jwtkey = builder.Configuration.GetSection("jwt:Key").Value;
+builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+     {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["jwt:Issuer"],
+            ValidAudience = builder.Configuration["jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtkey))
+        }; 
+     });
+
+builder.Services.AddAuthorization();
+
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -24,6 +53,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 
 var todoGroup = app.MapGroup("/api/todos").WithTags("Todos");
 
@@ -107,7 +138,7 @@ todoGroup.MapGet("/", async (AppDbContext db) =>
         t.Id, 
         t.Title, 
         t.IsCompleted));
-        
+
     return todos.Count == 0 ? Results.NotFound() : Results.Ok(todos);
 });
 
@@ -130,6 +161,38 @@ todoGroup.MapPost("/", async (AppDbContext db, TodoPostDto dto) =>
 
     return Results.Created($"/{todo.Id}", todo); 
 });
+
+#endregion
+
+#region Authentication Endpoints
+
+app.MapPost("/api/login",(LoginDto dto, IConfiguration configuration) =>
+{
+    if (dto.Username != "admin" || dto.Password != "password") return Results.Unauthorized();
+
+    var claims = new[]
+    {
+        new Claim(ClaimTypes.Name, dto.Username)
+    };
+
+    var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["jwt:Key"]));
+
+    var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+    var token = new JwtSecurityToken(
+        issuer: configuration["jwt:Issuer"],
+        audience: configuration["jwt:Audience"],
+        claims: claims,
+        expires: DateTime.UtcNow.AddDays(int.Parse(configuration["jwt:ExpireDays"])),
+        signingCredentials: credentials
+    );
+    
+    var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+
+    return Results.Ok(new {Token = tokenString});
+}).WithTags("Authentication")
+.Produces<LoginResponseDto>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status401Unauthorized);
 
 #endregion
 
